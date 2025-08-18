@@ -1,0 +1,25 @@
+# Body 日志中间件组件
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: body-logger
+spec:
+  type: middleware.http.body2binding
+  version: v1
+  metadata:
+  - name: logFile
+    value: "./middleware-body.log"
+  - name: logRequest
+    value: "true"
+  - name: logResponse
+    value: "true"
+  - name: maxBodySize
+    value: "10240"  # 10KB
+  - name: moduleHeader
+    value: "X-Module-Code"  # 模块码 header 名称
+  - name: actionHeader
+    value: "X-Action-Code"  # 动作码 header 名称
+  - name: logMethods
+    value: "POST,PUT,DELETE"  # 需要记录日志的HTTP方法
+  - name: bindingName
+    value: "log-binding"  # 发送日志的 binding 名称

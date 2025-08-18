@@ -1,0 +1,13 @@
+# 示例日志 binding 组件 - 使用 HTTP binding 发送到外部系统
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: log-binding
+spec:
+  type: bindings.http
+  version: v1
+  metadata:
+  - name: url
+    value: "http://localhost:8090/api/logs"  # 外部日志处理系统的 URL
+  - name: method
+    value: "POST"

@@ -1,0 +1,10 @@
+# Dapr 配置文件 - 启用 body 日志中间件
+apiVersion: dapr.io/v1alpha1
+kind: Configuration
+metadata:
+  name: body-logger-config
+spec:
+  httpPipeline:
+    handlers:
+    - name: body-logger
+      type: middleware.http.body2binding
