@@ -16,7 +16,7 @@
 
 ```sh
 mkdir dapr
-git clone https://github.com/dapr/dapr.git dapr/dapr
+git clone https://github.com/mescp/dapr.git mescp/dapr
 ```
 
 ## 构建 Dapr 二进制文件
@@ -27,7 +27,7 @@ git clone https://github.com/dapr/dapr.git dapr/dapr
 >
 > 这些说明还要求根据[设置说明](./setup-dapr-development-env.md#installing-make)为 `mingw32-make.exe` 创建 `make` 别名。
 
-- 运行 `make` 时，您需要在 `dapr/dapr` 仓库目录的根目录下，例如：`$GOPATH/src/github.com/dapr/dapr`。
+- 运行 `make` 时，您需要在 `me s cp/dapr` 仓库目录的根目录下，例如：`$GOPATH/src/github.com/mescp/dapr`。
 
 - 构建完成后，发布二进制文件将在 `./dist/{os}_{arch}/release/` 中找到，其中 `{os}_{arch}` 是您当前的操作系统和架构。
 
@@ -36,7 +36,7 @@ git clone https://github.com/dapr/dapr.git dapr/dapr
 - 为您当前的本地环境构建：
 
    ```sh
-   cd dapr/dapr
+   cd mescp/dapr
    make build
    ```
 
@@ -95,7 +95,7 @@ make check
 - stablecomponents - 在 Dapr sidecar 中包含所有稳定组件
 
 ```bash
-$ cd dapr/dapr/cmd/daprd
+$ cd mescp/dapr/cmd/daprd
 $ dlv debug . --build-flags=--tags=allcomponents
 Type 'help' for list of commands.
 (dlv) break main.main
