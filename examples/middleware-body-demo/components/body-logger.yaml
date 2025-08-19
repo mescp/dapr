@@ -23,3 +23,5 @@ spec:
     value: "POST,PUT,DELETE"  # 需要记录日志的HTTP方法
   - name: bindingName
     value: "log-binding"  # 发送日志的 binding 名称
+  - name: includeHeaders
+    value: "Authorization,User-Agent,Content-Type,X-Custom-Data,X-Permissions" # 需要记录的 header 名称，支持 JSON 格式

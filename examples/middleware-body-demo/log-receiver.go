@@ -11,13 +11,14 @@ import (
 
 // DataMessage 数据消息结构
 type DataMessage struct {
-	Timestamp    string `json:"timestamp"`
-	ModuleCode   string `json:"moduleCode"`
-	ActionCode   string `json:"actionCode"`
-	RequestBody  string `json:"requestBody"`
-	ResponseBody string `json:"responseBody"`
-	Method       string `json:"method"`
-	Path         string `json:"path"`
+	Timestamp    string      `json:"timestamp"`
+	ModuleCode   string      `json:"moduleCode"`
+	ActionCode   string      `json:"actionCode"`
+	RequestBody  interface{} `json:"requestBody,omitempty"`
+	ResponseBody interface{} `json:"responseBody,omitempty"`
+	Method       string      `json:"method"`
+	Path         string      `json:"path"`
+	Headers      interface{} `json:"headers,omitempty"`
 }
 
 // 注意：HTTP binding output 直接发送 data 内容作为 body，不需要 BindingRequest 包装
@@ -69,8 +70,37 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("  ActionCode: '%s'\n", dataMsg.ActionCode)
 	fmt.Printf("  Method: '%s'\n", dataMsg.Method)
 	fmt.Printf("  Path: '%s'\n", dataMsg.Path)
-	fmt.Printf("  RequestBody length: %d\n", len(dataMsg.RequestBody))
-	fmt.Printf("  ResponseBody length: %d\n", len(dataMsg.ResponseBody))
+	// 显示请求体信息
+	if dataMsg.RequestBody != nil {
+		if reqBodyBytes, err := json.Marshal(dataMsg.RequestBody); err == nil {
+			fmt.Printf("  RequestBody (JSON): %s\n", string(reqBodyBytes))
+		} else {
+			fmt.Printf("  RequestBody: %v\n", dataMsg.RequestBody)
+		}
+	} else {
+		fmt.Printf("  RequestBody: nil\n")
+	}
+
+	// 显示响应体信息
+	if dataMsg.ResponseBody != nil {
+		if respBodyBytes, err := json.Marshal(dataMsg.ResponseBody); err == nil {
+			fmt.Printf("  ResponseBody (JSON): %s\n", string(respBodyBytes))
+		} else {
+			fmt.Printf("  ResponseBody: %v\n", dataMsg.ResponseBody)
+		}
+	} else {
+		fmt.Printf("  ResponseBody: nil\n")
+	}
+	// 显示 Headers 信息
+	if dataMsg.Headers != nil {
+		if headersBytes, err := json.Marshal(dataMsg.Headers); err == nil {
+			fmt.Printf("  Headers (JSON): %s\n", string(headersBytes))
+		} else {
+			fmt.Printf("  Headers: %v\n", dataMsg.Headers)
+		}
+	} else {
+		fmt.Printf("  Headers: nil\n")
+	}
 
 	// 处理数据消息
 	processDataMessage(dataMsg)
@@ -87,8 +117,35 @@ func processDataMessage(dataMsg DataMessage) {
 	fmt.Printf("动作码: %s\n", dataMsg.ActionCode)
 	fmt.Printf("请求方法: %s\n", dataMsg.Method)
 	fmt.Printf("请求路径: %s\n", dataMsg.Path)
-	fmt.Printf("请求体: %s\n", dataMsg.RequestBody)
-	fmt.Printf("响应体: %s\n", dataMsg.ResponseBody)
+	// 显示请求体
+	if dataMsg.RequestBody != nil {
+		if reqBodyBytes, err := json.Marshal(dataMsg.RequestBody); err == nil {
+			fmt.Printf("请求体: %s\n", string(reqBodyBytes))
+		} else {
+			fmt.Printf("请求体: %v\n", dataMsg.RequestBody)
+		}
+	} else {
+		fmt.Printf("请求体: <空>\n")
+	}
+
+	// 显示响应体
+	if dataMsg.ResponseBody != nil {
+		if respBodyBytes, err := json.Marshal(dataMsg.ResponseBody); err == nil {
+			fmt.Printf("响应体: %s\n", string(respBodyBytes))
+		} else {
+			fmt.Printf("响应体: %v\n", dataMsg.ResponseBody)
+		}
+	} else {
+		fmt.Printf("响应体: <空>\n")
+	}
+	// 显示请求头
+	if dataMsg.Headers != nil {
+		if headersBytes, err := json.Marshal(dataMsg.Headers); err == nil {
+			fmt.Printf("请求头: %s\n", string(headersBytes))
+		} else {
+			fmt.Printf("请求头: %v\n", dataMsg.Headers)
+		}
+	}
 	fmt.Printf("处理时间: %s\n", time.Now().Format(time.RFC3339))
 	fmt.Println("==================")
 

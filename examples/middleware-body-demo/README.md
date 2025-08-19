@@ -369,7 +369,7 @@ go run log-receiver.go
 
 # 2. 启动 Dapr 应用
 daprd --app-id demo-app --app-port 8080 --dapr-http-port 3500 \
-  --config dapr-config.yaml --components-path ./components & 
+  --config dapr-config.yaml --components-path ./components
 
 # 3. 启动用户应用
 go run main.go 

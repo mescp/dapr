@@ -38,13 +38,14 @@ import (
 
 // DataMessage 定义发送到 binding 的数据消息结构
 type DataMessage struct {
-	Timestamp    string `json:"timestamp"`
-	ModuleCode   string `json:"moduleCode"`
-	ActionCode   string `json:"actionCode"`
-	RequestBody  string `json:"requestBody"`
-	ResponseBody string `json:"responseBody"`
-	Method       string `json:"method"`
-	Path         string `json:"path"`
+	Timestamp    string      `json:"timestamp"`
+	ModuleCode   string      `json:"moduleCode"`
+	ActionCode   string      `json:"actionCode"`
+	RequestBody  interface{} `json:"requestBody,omitempty"`
+	ResponseBody interface{} `json:"responseBody,omitempty"`
+	Method       string      `json:"method"`
+	Path         string      `json:"path"`
+	Headers      interface{} `json:"headers,omitempty"`
 }
 
 // sendDataToBinding 通过 gRPC API 发送数据消息到指定的 binding
@@ -154,24 +155,43 @@ func init() {
 				}
 			}
 
+			// 获取需要包含在日志中的 header keys，支持逗号分隔的列表
+			includeHeaders := metadata.Properties["includeHeaders"]
+			var headerKeys []string
+			if includeHeaders != "" {
+				for _, header := range strings.Split(includeHeaders, ",") {
+					header = strings.TrimSpace(header)
+					if header != "" {
+						headerKeys = append(headerKeys, header)
+					}
+				}
+			}
+
 			return func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					var requestBodyStr string
+					var requestBodyObj interface{}
 
 					// 记录请求体
 					if logRequest && r.Body != nil {
 						requestBody, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize))
 						if err != nil {
 							log.Errorf("Read request body failed: %v", err)
-							requestBodyStr = fmt.Sprintf("Read error: %v", err)
+							requestBodyObj = map[string]string{"error": fmt.Sprintf("Read error: %v", err)}
 						} else {
-							requestBodyStr = string(requestBody)
+							// 尝试解析为 JSON
+							var jsonObj interface{}
+							if err := json.Unmarshal(requestBody, &jsonObj); err != nil {
+								// 如果不是有效的 JSON，则作为字符串存储
+								requestBodyObj = string(requestBody)
+							} else {
+								requestBodyObj = jsonObj
+							}
 							// 重置请求体供后续处理使用
 							r.Body = io.NopCloser(bytes.NewReader(requestBody))
 						}
 					}
 
-					var responseBodyStr string
+					var responseBodyObj interface{}
 					var bodyRecorder *bodyResponseWriter
 
 					// 如果需要记录响应体，包装响应写入器
@@ -189,7 +209,15 @@ func init() {
 
 					// 获取响应体
 					if logResponse && bodyRecorder != nil {
-						responseBodyStr = bodyRecorder.body.String()
+						responseBodyStr := bodyRecorder.body.String()
+						// 尝试解析为 JSON
+						var jsonObj interface{}
+						if err := json.Unmarshal([]byte(responseBodyStr), &jsonObj); err != nil {
+							// 如果不是有效的 JSON，则作为字符串存储
+							responseBodyObj = responseBodyStr
+						} else {
+							responseBodyObj = jsonObj
+						}
 					}
 
 					// 记录到日志文件
@@ -209,36 +237,64 @@ func init() {
 							return
 						}
 
-						// 五列一行格式：模块码 | 动作码 | 请求体 | 响应体 | 时间戳
-						var requestBody, responseBody string
-						if logRequest {
-							requestBody = requestBodyStr
-						} else {
-							requestBody = ""
-						}
-
-						if logResponse {
-							responseBody = responseBodyStr
-						} else {
-							responseBody = ""
-						}
-
-						// 将换行符和分隔符替换为空格，确保一行记录
-						requestBody = strings.ReplaceAll(strings.ReplaceAll(requestBody, "\n", " "), "|", "｜")
-						responseBody = strings.ReplaceAll(strings.ReplaceAll(responseBody, "\n", " "), "|", "｜")
-
 						// 获取当前时间戳
 						timestamp := time.Now().Format(time.RFC3339)
 
+						// 收集指定的 headers
+						var headers interface{}
+						if len(headerKeys) > 0 {
+							headersMap := make(map[string]interface{})
+							for _, headerKey := range headerKeys {
+								if headerValues := r.Header.Values(headerKey); len(headerValues) > 0 {
+									if len(headerValues) == 1 {
+										// 单个值：尝试解析为 JSON，失败则作为字符串
+										headerValue := headerValues[0]
+										var jsonObj interface{}
+										if err := json.Unmarshal([]byte(headerValue), &jsonObj); err != nil {
+											// 不是有效的 JSON，作为字符串存储
+											headersMap[headerKey] = headerValue
+										} else {
+											// 是有效的 JSON，存储解析后的对象
+											headersMap[headerKey] = jsonObj
+										}
+									} else {
+										// 多个值：创建数组，每个值尝试解析为 JSON
+										var valueArray []interface{}
+										for _, value := range headerValues {
+											var jsonObj interface{}
+											if err := json.Unmarshal([]byte(value), &jsonObj); err != nil {
+												// 不是有效的 JSON，作为字符串存储
+												valueArray = append(valueArray, value)
+											} else {
+												// 是有效的 JSON，存储解析后的对象
+												valueArray = append(valueArray, jsonObj)
+											}
+										}
+										headersMap[headerKey] = valueArray
+									}
+								}
+							}
+							if len(headersMap) > 0 {
+								headers = headersMap
+							}
+						}
+
 						// 创建数据消息结构
 						dataMsg := DataMessage{
-							Timestamp:    timestamp,
-							ModuleCode:   moduleCode,
-							ActionCode:   actionCode,
-							RequestBody:  requestBody,
-							ResponseBody: responseBody,
-							Method:       r.Method,
-							Path:         r.URL.Path,
+							Timestamp:  timestamp,
+							ModuleCode: moduleCode,
+							ActionCode: actionCode,
+							Method:     r.Method,
+							Path:       r.URL.RequestURI(),
+							Headers:    headers,
+						}
+
+						// 根据配置设置请求体和响应体
+						if logRequest {
+							dataMsg.RequestBody = requestBodyObj
+						}
+						if logResponse {
+							dataMsg.ResponseBody = responseBodyObj
 						}
 
 						log.Debugf("Logging %s %s: %s/%s", dataMsg.Method, dataMsg.Path, dataMsg.ModuleCode, dataMsg.ActionCode)
@@ -250,12 +306,35 @@ func init() {
 
 						// 同时写入日志文件（可选）
 						if logFile != "" {
+							// 将 JSON 对象序列化为字符串用于日志文件
+							var requestBodyStr, responseBodyStr string
+
+							if dataMsg.RequestBody != nil {
+								if reqBodyBytes, err := json.Marshal(dataMsg.RequestBody); err == nil {
+									requestBodyStr = string(reqBodyBytes)
+								} else {
+									requestBodyStr = fmt.Sprintf("%v", dataMsg.RequestBody)
+								}
+							}
+
+							if dataMsg.ResponseBody != nil {
+								if respBodyBytes, err := json.Marshal(dataMsg.ResponseBody); err == nil {
+									responseBodyStr = string(respBodyBytes)
+								} else {
+									responseBodyStr = fmt.Sprintf("%v", dataMsg.ResponseBody)
+								}
+							}
+
+							// 将换行符和分隔符替换为空格，确保一行记录
+							requestBodyStr = strings.ReplaceAll(strings.ReplaceAll(requestBodyStr, "\n", " "), "|", "｜")
+							responseBodyStr = strings.ReplaceAll(strings.ReplaceAll(responseBodyStr, "\n", " "), "|", "｜")
+
 							logEntry := fmt.Sprintf("%s|%s|%s|%s|%s\n",
 								timestamp,
 								moduleCode,
 								actionCode,
-								requestBody,
-								responseBody)
+								requestBodyStr,
+								responseBodyStr)
 
 							// 异步写入日志文件以减少性能影响
 							go func() {
