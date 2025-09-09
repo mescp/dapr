@@ -44,7 +44,7 @@ sequenceDiagram
     participant B as HTTP Binding
     participant E as 外部服务
 
-    C->>D: POST /v1.0/invoke/demo-app/method/api/users<br/>Headers: X-Module-Code, X-Action-Code
+    C->>D: POST /v1.0/invoke/demo-app/method/api/users<br/>Headers: X-Function-Code, X-Action-Code
     D->>M: 拦截请求
     
     Note over M: 检查 HTTP 方法<br/>检查必需 Headers
@@ -54,10 +54,10 @@ sequenceDiagram
     A->>M: 返回响应
     M->>M: 捕获响应体
     
-    Note over M: 构建日志消息<br/>{timestamp, moduleCode, actionCode, requestBody, responseBody, method, path}
+    Note over M: 构建日志消息<br/>{timestamp, functionCode, actionCode, requestBody, responseBody, method, path}
     
     par 并行处理
-        M->>F: 写入本地日志文件<br/>格式: timestamp|moduleCode|actionCode|requestBody|responseBody
+        M->>F: 写入本地日志文件<br/>格式: timestamp|functionCode|actionCode|requestBody|responseBody
     and
         M->>B: gRPC InvokeBinding<br/>直接调用，避免HTTP中间件循环
         B->>E: HTTP POST /api/logs<br/>发送 LogMessage JSON
@@ -75,7 +75,7 @@ sequenceDiagram
 - **功能**: 拦截 HTTP 请求/响应，提取并记录消息体
 - **触发条件**: 
   - HTTP 方法匹配配置 (默认: POST, PUT, DELETE)
-  - 包含必需的 Headers (X-Module-Code, X-Action-Code)
+  - 包含必需的 Headers (X-Function-Code, X-Action-Code)
 - **输出**: 本地文件 + HTTP Binding
 
 #### 2. HTTP Binding
@@ -90,7 +90,7 @@ sequenceDiagram
 ```json
 {
   "timestamp": "2024-01-15T10:31:00Z",
-  "moduleCode": "USER_MODULE",
+  "functionCode": "USER_MODULE",
   "actionCode": "CREATE_USER",
   "requestBody": "{\"name\": \"张三\"}",
   "responseBody": "{\"id\": 1, \"name\": \"张三\"}",
@@ -110,7 +110,7 @@ sequenceDiagram
   "operation": "create",
   "data": {
     "timestamp": "2024-01-15T10:31:00Z",
-    "moduleCode": "USER_MODULE",
+    "functionCode": "USER_MODULE",
     "actionCode": "CREATE_USER",
     "requestBody": "{\"name\": \"张三\"}",
     "responseBody": "{\"id\": 1, \"name\": \"张三\"}",
@@ -124,7 +124,7 @@ sequenceDiagram
 ```json
 {
   "timestamp": "2024-01-15T10:31:00Z",
-  "moduleCode": "USER_MODULE",
+  "functionCode": "USER_MODULE",
   "actionCode": "CREATE_USER",
   "requestBody": "{\"name\": \"张三\"}",
   "responseBody": "{\"id\": 1, \"name\": \"张三\"}",
@@ -170,24 +170,24 @@ go run main.go
 # 健康检查
 curl http://localhost:3500/v1.0/invoke/demo-app/method/health
 
-# 创建用户（带模块码和动作码）
+# 创建用户（带功能码和动作码）
 curl -X POST http://localhost:3500/v1.0/invoke/demo-app/method/api/users \
   -H "Content-Type: application/json" \
-  -H "X-Module-Code: USER_MODULE" \
+  -H "X-Function-Code: USER_MODULE" \
   -H "X-Action-Code: CREATE_USER" \
   -d '{"name": "张三", "email": "zhangsan@example.com"}'
 
 # 获取所有用户
 curl http://localhost:3500/v1.0/invoke/demo-app/method/api/users
 
-# 获取所有用户（带模块码和动作码）
+# 获取所有用户（带功能码和动作码）
 curl http://localhost:3500/v1.0/invoke/demo-app/method/api/users \
-  -H "X-Module-Code: USER_MODULE" \
+  -H "X-Function-Code: USER_MODULE" \
   -H "X-Action-Code: LIST_USERS"
 
-# 获取特定用户（带模块码和动作码）
+# 获取特定用户（带功能码和动作码）
 curl http://localhost:3500/v1.0/invoke/demo-app/method/api/users/1 \
-  -H "X-Module-Code: USER_MODULE" \
+  -H "X-Function-Code: USER_MODULE" \
   -H "X-Action-Code: GET_USER"
 ```
 
@@ -202,7 +202,7 @@ cat middleware-body.log
 
 日志文件 `middleware-body.log` 将包含五列格式的数据：
 
-**格式：模块码|动作码|请求体|响应体|时间戳**
+**格式：功能码|动作码|请求体|响应体|时间戳**
 
 ```
 USER_MODULE|CREATE_USER|{"name": "张三", "email": "zhangsan@example.com"}|{"id":1,"name":"张三","email":"zhangsan@example.com","created":"2024-01-15T10:31:00.456Z"}|2024-01-15T10:31:00Z
@@ -210,7 +210,7 @@ USER_MODULE|CREATE_USER|{"name": "张三", "email": "zhangsan@example.com"}|{"id
 
 **注意：** 
 - 默认只记录 POST 请求（可通过配置 `logMethods` 修改）
-- 没有带模块码和动作码 header 的请求也不会出现在日志中
+- 没有带功能码和动作码 header 的请求也不会出现在日志中
 
 ## 配置选项
 
@@ -220,17 +220,21 @@ USER_MODULE|CREATE_USER|{"name": "张三", "email": "zhangsan@example.com"}|{"id
 - `logRequest`: 设置为 `false` 禁用请求体记录
 - `logResponse`: 设置为 `false` 禁用响应体记录  
 - `maxBodySize`: 调整最大记录体大小
-- `moduleHeader`: 指定模块码的 header 名称（默认：X-Module-Code）
+- `functionHeader`: 指定功能码的 header 名称（默认：X-Function-Code）
 - `actionHeader`: 指定动作码的 header 名称（默认：X-Action-Code）
 - `logMethods`: 指定需要记录日志的HTTP方法，用逗号分隔（默认：POST,PUT,DELETE）
 - `bindingName`: 指定发送日志的 Dapr binding 名称（可选）
+- `includePaths`: 指定需要记录日志的URL路径正则表达式，用逗号分隔多个模式（可选）
+- `excludePaths`: 指定需要排除记录日志的URL路径正则表达式，用逗号分隔多个模式（可选）
 
 **注意：** 
 - 默认只记录 POST、PUT、DELETE 请求，可通过 `logMethods` 配置修改
 - 如果配置了 `bindingName`，日志将通过 Dapr gRPC API 异步发送到外部系统
 - 使用 gRPC API 调用 binding，避免 HTTP 中间件循环问题
 - Dapr gRPC 端口会自动从运行时环境变量 `DAPR_GRPC_PORT` 获取
-- 如果请求中缺少模块码或动作码 header，中间件将不会记录任何日志
+- 如果请求中缺少功能码或动作码 header，中间件将不会记录任何日志
+- 路径过滤规则：先检查包含列表（如果配置），再检查排除列表
+- 路径过滤支持正则表达式，如果正则表达式编译失败会记录警告并跳过该模式
 
 ### 配置示例
 
@@ -258,6 +262,52 @@ USER_MODULE|CREATE_USER|{"name": "张三", "email": "zhangsan@example.com"}|{"id
   value: "log-binding"
 ```
 
+**路径过滤配置：**
+```yaml
+# 只记录 API 路径
+- name: includePaths
+  value: "^/api/.*"
+
+# 排除静态资源和健康检查
+- name: excludePaths
+  value: "/health,/metrics,.*\\.css,.*\\.js,.*\\.png"
+
+# 组合使用：只记录API路径但排除某些特定路径
+- name: includePaths
+  value: "^/api/.*"
+- name: excludePaths
+  value: "/api/health,/api/metrics"
+```
+
+## 路径过滤功能
+
+中间件支持基于URL路径的日志过滤，使用正则表达式进行灵活的路径匹配。
+
+### 过滤规则
+
+1. **包含路径（includePaths）**：
+   - 如果配置了包含路径，只有匹配这些模式的请求才会被记录
+   - 支持多个正则表达式模式，用逗号分隔
+   - 如果未配置，则默认包含所有路径
+
+2. **排除路径（excludePaths）**：
+   - 匹配这些模式的请求将被排除，不会记录日志
+   - 支持多个正则表达式模式，用逗号分隔
+   - 排除规则在包含规则之后执行
+
+3. **执行顺序**：
+   ```
+   请求 → HTTP方法检查 → 路径包含检查 → 路径排除检查 → Header检查 → 记录日志
+   ```
+
+### 常用正则表达式模式
+
+- `^/api/.*` - 匹配所有以 `/api/` 开头的路径
+- `/health` - 精确匹配 `/health` 路径
+- `.*\\.css` - 匹配所有 CSS 文件
+- `/api/(users|orders)/.*` - 匹配用户或订单相关的API路径
+- `/v[0-9]+/.*` - 匹配带版本号的API路径（如 `/v1/`, `/v2/`）
+
 ## Binding 集成
 
 中间件支持通过 Dapr binding 将日志异步发送到外部系统，这样可以实现更灵活的日志处理。
@@ -269,7 +319,7 @@ USER_MODULE|CREATE_USER|{"name": "张三", "email": "zhangsan@example.com"}|{"id
 ```json
 {
   "timestamp": "2024-01-15T10:31:00Z",
-  "moduleCode": "USER_MODULE",
+  "functionCode": "USER_MODULE",
   "actionCode": "CREATE_USER",
   "requestBody": "{\"name\": \"张三\", \"email\": \"zhangsan@example.com\"}",
   "responseBody": "{\"id\":1,\"name\":\"张三\",\"email\":\"zhangsan@example.com\"}",
@@ -377,7 +427,7 @@ go run main.go
 # 4. 发送测试请求
 curl -X POST http://localhost:3500/v1.0/invoke/demo-app/method/api/users \
   -H "Content-Type: application/json" \
-  -H "X-Module-Code: USER_MODULE" \
+  -H "X-Function-Code: USER_MODULE" \
   -H "X-Action-Code: CREATE_USER" \
   -d '{"name": "张三", "email": "zhangsan@example.com"}'
 ```
@@ -458,7 +508,7 @@ curl -X POST http://localhost:3500/v1.0/invoke/demo-app/method/api/users \
    ```bash
    curl -X POST http://localhost:3500/v1.0/invoke/demo-app/method/api/users \
      -H "Content-Type: application/json" \
-     -H "X-Module-Code: USER_MODULE" \
+     -H "X-Function-Code: USER_MODULE" \
      -H "X-Action-Code: CREATE_USER" \
      -d '{"name": "测试", "email": "test@example.com"}'
    ```

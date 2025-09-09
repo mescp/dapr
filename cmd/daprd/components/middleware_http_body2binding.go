@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,7 +40,7 @@ import (
 // DataMessage 定义发送到 binding 的数据消息结构
 type DataMessage struct {
 	Timestamp    string      `json:"timestamp"`
-	ModuleCode   string      `json:"moduleCode"`
+	FunctionCode string      `json:"functionCode"`
 	ActionCode   string      `json:"actionCode"`
 	RequestBody  interface{} `json:"requestBody,omitempty"`
 	ResponseBody interface{} `json:"responseBody,omitempty"`
@@ -64,7 +65,7 @@ func sendDataToBinding(bindingName, daprGRPCPort string, dataMsg DataMessage, lo
 		}
 
 		// 连接到 Dapr gRPC API
-		conn, err := grpc.Dial(
+		conn, err := grpc.NewClient(
 			fmt.Sprintf("localhost:%s", daprGRPCPort),
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		)
@@ -129,10 +130,10 @@ func init() {
 				}
 			}
 
-			// 获取模块码和操作码的 header 字段名，默认值
-			moduleHeader := metadata.Properties["moduleHeader"]
-			if moduleHeader == "" {
-				moduleHeader = "X-Module-Code"
+			// 获取功能码和操作码的 header 字段名，默认值
+			functionHeader := metadata.Properties["functionHeader"]
+			if functionHeader == "" {
+				functionHeader = "X-Function-Code"
 			}
 
 			actionHeader := metadata.Properties["actionHeader"]
@@ -163,6 +164,40 @@ func init() {
 					header = strings.TrimSpace(header)
 					if header != "" {
 						headerKeys = append(headerKeys, header)
+					}
+				}
+			}
+
+			// 获取路径过滤配置，支持正则表达式
+			includePathsStr := metadata.Properties["includePaths"]
+			excludePathsStr := metadata.Properties["excludePaths"]
+
+			// 编译包含路径的正则表达式
+			var includePathRegexes []*regexp.Regexp
+			if includePathsStr != "" {
+				for _, pathPattern := range strings.Split(includePathsStr, ",") {
+					pathPattern = strings.TrimSpace(pathPattern)
+					if pathPattern != "" {
+						if regex, err := regexp.Compile(pathPattern); err != nil {
+							log.Warnf("Invalid includePaths regex pattern '%s': %v", pathPattern, err)
+						} else {
+							includePathRegexes = append(includePathRegexes, regex)
+						}
+					}
+				}
+			}
+
+			// 编译排除路径的正则表达式
+			var excludePathRegexes []*regexp.Regexp
+			if excludePathsStr != "" {
+				for _, pathPattern := range strings.Split(excludePathsStr, ",") {
+					pathPattern = strings.TrimSpace(pathPattern)
+					if pathPattern != "" {
+						if regex, err := regexp.Compile(pathPattern); err != nil {
+							log.Warnf("Invalid excludePaths regex pattern '%s': %v", pathPattern, err)
+						} else {
+							excludePathRegexes = append(excludePathRegexes, regex)
+						}
 					}
 				}
 			}
@@ -227,13 +262,44 @@ func init() {
 							return
 						}
 
-						// 从 header 中获取模块码和动作码
-						moduleCode := r.Header.Get(moduleHeader)
+						// 检查路径是否应该被记录
+						requestPath := r.URL.RequestURI()
+						shouldLog := true
+
+						// 如果配置了包含路径，检查当前路径是否匹配任何包含模式
+						if len(includePathRegexes) > 0 {
+							shouldLog = false
+							for _, regex := range includePathRegexes {
+								if regex.MatchString(requestPath) {
+									shouldLog = true
+									break
+								}
+							}
+						}
+
+						// 如果路径通过包含检查，再检查是否在排除列表中
+						if shouldLog && len(excludePathRegexes) > 0 {
+							for _, regex := range excludePathRegexes {
+								if regex.MatchString(requestPath) {
+									shouldLog = false
+									break
+								}
+							}
+						}
+
+						// 如果路径被过滤掉，则不记录日志
+						if !shouldLog {
+							log.Debugf("Skipping log due to path filtering: %s", requestPath)
+							return
+						}
+
+						// 从 header 中获取功能码和动作码
+						functionCode := r.Header.Get(functionHeader)
 						actionCode := r.Header.Get(actionHeader)
 
-						// 如果模块码或动作码为空，则不记录日志
-						if moduleCode == "" || actionCode == "" {
-							log.Debugf("Skipping log due to missing headers: moduleCode=%s, actionCode=%s", moduleCode, actionCode)
+						// 如果功能码或动作码为空，则不记录日志
+						if functionCode == "" || actionCode == "" {
+							log.Debugf("Skipping log due to missing headers: functionCode=%s, actionCode=%s", functionCode, actionCode)
 							return
 						}
 
@@ -281,12 +347,12 @@ func init() {
 
 						// 创建数据消息结构
 						dataMsg := DataMessage{
-							Timestamp:  timestamp,
-							ModuleCode: moduleCode,
-							ActionCode: actionCode,
-							Method:     r.Method,
-							Path:       r.URL.RequestURI(),
-							Headers:    headers,
+							Timestamp:    timestamp,
+							FunctionCode: functionCode,
+							ActionCode:   actionCode,
+							Method:       r.Method,
+							Path:         requestPath,
+							Headers:      headers,
 						}
 
 						// 根据配置设置请求体和响应体
@@ -297,7 +363,7 @@ func init() {
 							dataMsg.ResponseBody = responseBodyObj
 						}
 
-						log.Debugf("Logging %s %s: %s/%s", dataMsg.Method, dataMsg.Path, dataMsg.ModuleCode, dataMsg.ActionCode)
+						log.Debugf("Logging %s %s: %s/%s", dataMsg.Method, dataMsg.Path, dataMsg.FunctionCode, dataMsg.ActionCode)
 
 						// 如果配置了 binding，则发送到 binding
 						if bindingName != "" {
@@ -331,7 +397,7 @@ func init() {
 
 							logEntry := fmt.Sprintf("%s|%s|%s|%s|%s\n",
 								timestamp,
-								moduleCode,
+								functionCode,
 								actionCode,
 								requestBodyStr,
 								responseBodyStr)

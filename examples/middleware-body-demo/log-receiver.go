@@ -12,7 +12,7 @@ import (
 // DataMessage 数据消息结构
 type DataMessage struct {
 	Timestamp    string      `json:"timestamp"`
-	ModuleCode   string      `json:"moduleCode"`
+	FunctionCode string      `json:"functionCode"`
 	ActionCode   string      `json:"actionCode"`
 	RequestBody  interface{} `json:"requestBody,omitempty"`
 	ResponseBody interface{} `json:"responseBody,omitempty"`
@@ -66,7 +66,7 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("解析为 DataMessage: %+v\n", dataMsg)
 	fmt.Printf("详细字段检查:\n")
 	fmt.Printf("  Timestamp: '%s'\n", dataMsg.Timestamp)
-	fmt.Printf("  ModuleCode: '%s'\n", dataMsg.ModuleCode)
+	fmt.Printf("  FunctionCode: '%s'\n", dataMsg.FunctionCode)
 	fmt.Printf("  ActionCode: '%s'\n", dataMsg.ActionCode)
 	fmt.Printf("  Method: '%s'\n", dataMsg.Method)
 	fmt.Printf("  Path: '%s'\n", dataMsg.Path)
@@ -113,7 +113,7 @@ func processDataMessage(dataMsg DataMessage) {
 	// 在这里实现您的数据处理逻辑
 	fmt.Printf("\n=== 收到数据消息 ===\n")
 	fmt.Printf("时间戳: %s\n", dataMsg.Timestamp)
-	fmt.Printf("模块码: %s\n", dataMsg.ModuleCode)
+	fmt.Printf("功能码: %s\n", dataMsg.FunctionCode)
 	fmt.Printf("动作码: %s\n", dataMsg.ActionCode)
 	fmt.Printf("请求方法: %s\n", dataMsg.Method)
 	fmt.Printf("请求路径: %s\n", dataMsg.Path)
@@ -149,8 +149,8 @@ func processDataMessage(dataMsg DataMessage) {
 	fmt.Printf("处理时间: %s\n", time.Now().Format(time.RFC3339))
 	fmt.Println("==================")
 
-	// 示例：根据模块码和动作码进行不同的处理
-	switch dataMsg.ModuleCode {
+	// 示例：根据功能码和动作码进行不同的处理
+	switch dataMsg.FunctionCode {
 	case "USER_MODULE":
 		handleUserModuleLogs(dataMsg)
 	case "ORDER_MODULE":
@@ -185,5 +185,5 @@ func handleOrderModuleLogs(dataMsg DataMessage) {
 }
 
 func handleGenericLogs(dataMsg DataMessage) {
-	fmt.Printf("📊 通用数据处理: %s.%s\n", dataMsg.ModuleCode, dataMsg.ActionCode)
+	fmt.Printf("📊 通用数据处理: %s.%s\n", dataMsg.FunctionCode, dataMsg.ActionCode)
 }

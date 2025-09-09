@@ -15,10 +15,14 @@ spec:
     value: "true"
   - name: maxBodySize
     value: "10240"  # 10KB
-  - name: moduleHeader
-    value: "X-Module-Code"  # 模块码 header 名称
+  - name: functionHeader
+    value: "X-Function-Code"  # 功能码 header 名称
   - name: actionHeader
     value: "X-Action-Code"  # 动作码 header 名称
+  - name: includePaths
+    value: "^/v1.0/.*" # 只记录 /v1.0/ 开头的路径，支持正则表达式，逗号分隔多个模式
+  - name: excludePaths
+    value: "/health,\\?.*[Qq][Uu][Ee][Rr][Yy]" # 排除健康检查、url中包含query字符串，query字符不区分大小写，逗号分隔多个模式
   - name: logMethods
     value: "POST,PUT,DELETE"  # 需要记录日志的HTTP方法
   - name: bindingName

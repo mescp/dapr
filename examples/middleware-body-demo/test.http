@@ -1,0 +1,13 @@
+curl -X POST http://localhost:3500/v1.0/invoke/demo-app/method/api/users \
+  -H "Content-Type: application/json" \
+  -H "X-Function-Code: USER_FUNCTION" \
+  -H "X-Action-Code: CREATE_USER" \
+  -d '{"name": "张三", "email": "zhangsan@example.com"}'
+
+
+###  query 参数
+curl -X POST http://localhost:3500/v1.0/invoke/demo-app/method/api/users?query \
+  -H "Content-Type: application/json" \
+  -H "X-Function-Code: USER_FUNCTION" \
+  -H "X-Action-Code: CREATE_USER" \
+  -d '{"name": "张三", "email": "zhangsan@example.com"}'
