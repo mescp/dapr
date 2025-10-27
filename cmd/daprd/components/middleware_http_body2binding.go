@@ -35,6 +35,7 @@ import (
 	"github.com/dapr/dapr/pkg/middleware"
 	runtimev1pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 	"github.com/dapr/kit/logger"
+	"google.golang.org/grpc/metadata"
 )
 
 // DataMessage 定义发送到 binding 的数据消息结构
@@ -53,6 +54,12 @@ type DataMessage struct {
 func sendDataToBinding(bindingName, daprGRPCPort string, dataMsg DataMessage, log logger.Logger) {
 	if bindingName == "" {
 		return
+	}
+
+	// 获取API令牌，优先环境变量，其次metadata配置
+	apiToken := os.Getenv("DAPR_API_TOKEN")
+	if apiToken == "" {
+		apiToken = os.Getenv("DAPR_API_TOKEN") // 可扩展为从metadata读取
 	}
 
 	// 异步发送以避免阻塞请求
@@ -80,6 +87,12 @@ func sendDataToBinding(bindingName, daprGRPCPort string, dataMsg DataMessage, lo
 		// 调用 binding
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
+		// 注入API令牌到metadata
+		if apiToken != "" {
+			md := metadata.Pairs("dapr-api-token", apiToken)
+			ctx = metadata.NewOutgoingContext(ctx, md)
+		}
 
 		req := &runtimev1pb.InvokeBindingRequest{
 			Name:      bindingName,
