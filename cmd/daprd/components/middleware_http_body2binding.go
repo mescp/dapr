@@ -18,6 +18,7 @@ package components
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,6 +71,8 @@ func sendDataToBinding(bindingName, daprGRPCPort string, dataMsg DataMessage, lo
 			log.Errorf("Marshal data failed: %v", err)
 			return
 		}
+		// 打印日志
+		log.Debugf("Sending data to binding %s: %s", bindingName, string(jsonData))
 
 		// 连接到 Dapr gRPC API
 		conn, err := grpc.NewClient(
@@ -257,14 +260,19 @@ func init() {
 
 					// 获取响应体
 					if logResponse && bodyRecorder != nil {
-						responseBodyStr := bodyRecorder.body.String()
-						// 尝试解析为 JSON
+						responseBodyBytes := bodyRecorder.body.Bytes()
 						var jsonObj interface{}
-						if err := json.Unmarshal([]byte(responseBodyStr), &jsonObj); err != nil {
-							// 如果不是有效的 JSON，则作为字符串存储
-							responseBodyObj = responseBodyStr
-						} else {
+						if err := json.Unmarshal(responseBodyBytes, &jsonObj); err == nil {
+							// 有效 JSON
 							responseBodyObj = jsonObj
+						} else if isText(responseBodyBytes) {
+							// 是文本（如UTF-8），直接保存为字符串
+							responseBodyObj = string(responseBodyBytes)
+						} else {
+							// 二进制，保存为 base64
+							responseBodyObj = map[string]string{
+								"base64": base64.StdEncoding.EncodeToString(responseBodyBytes),
+							}
 						}
 					}
 
@@ -434,6 +442,17 @@ func init() {
 			}, nil
 		}
 	}, "body2binding")
+}
+
+// 判断是否为文本内容（简单判断，ASCII范围）
+func isText(data []byte) bool {
+	// 允许常见的控制字符（如换行、回车、制表符）
+	for _, b := range data {
+		if (b < 0x09 || (b > 0x0D && b < 0x20) || b > 0x7E) && b != 0x0A && b != 0x0D {
+			return false
+		}
+	}
+	return true
 }
 
 // bodyResponseWriter 包装 http.ResponseWriter 以捕获响应体
