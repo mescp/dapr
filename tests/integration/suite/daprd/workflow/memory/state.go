@@ -39,11 +39,9 @@ type state struct {
 }
 
 func (s *state) Setup(t *testing.T) []framework.Option {
-	t.Skip("TODO: @joshvanl: re-enable")
-
-	// 2MB payload. Enough memory to be larger than the background variant memory
+	// 1MB payload. Enough memory to be larger than the background variant memory
 	// so we can measure (actor) workflow history memory does not leak.
-	input := bytes.Repeat([]byte("0"), 2*1024*1024)
+	input := bytes.Repeat([]byte("0"), 1024*1024)
 
 	s.workflow = workflow.New(t,
 		workflow.WithAddOrchestrator(t, "foo", func(ctx *task.OrchestrationContext) (any, error) {
@@ -51,7 +49,6 @@ func (s *state) Setup(t *testing.T) []framework.Option {
 			return "", nil
 		}),
 		workflow.WithAddActivity(t, "bar", func(ctx task.ActivityContext) (any, error) { return "", nil }),
-		workflow.WithScheduler(true),
 	)
 
 	return []framework.Option{
@@ -87,5 +84,5 @@ func (s *state) Run(t *testing.T, ctx context.Context) {
 			35,
 			"workflow memory leak",
 		)
-	}, time.Second*10, time.Millisecond*10)
+	}, time.Second*30, time.Millisecond*10)
 }

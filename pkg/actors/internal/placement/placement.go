@@ -25,7 +25,6 @@ import (
 	"github.com/dapr/dapr/pkg/actors/api"
 	"github.com/dapr/dapr/pkg/actors/internal/apilevel"
 	"github.com/dapr/dapr/pkg/actors/internal/placement/client"
-	"github.com/dapr/dapr/pkg/actors/internal/reminders/storage"
 	"github.com/dapr/dapr/pkg/actors/table"
 	diag "github.com/dapr/dapr/pkg/diagnostics"
 	"github.com/dapr/dapr/pkg/healthz"
@@ -71,7 +70,6 @@ type Options struct {
 	APILevel  *apilevel.APILevel
 	Security  security.Handler
 	Table     table.Interface
-	Reminders storage.Interface
 	Healthz   healthz.Healthz
 	Mode      modes.DaprMode
 }
@@ -79,7 +77,6 @@ type Options struct {
 type placement struct {
 	client     *client.Client
 	actorTable table.Interface
-	reminders  storage.Interface
 	apiLevel   *apilevel.APILevel
 	htarget    healthz.Target
 
@@ -100,7 +97,6 @@ type placement struct {
 	namespace string
 	hostname  string
 	port      string
-	isReady   atomic.Bool
 	readyCh   chan struct{}
 	wg        sync.WaitGroup
 	closedCh  chan struct{}
@@ -134,7 +130,6 @@ func New(opts Options) (Interface, error) {
 		hashTable: &hashing.ConsistentHashTables{
 			Entries: make(map[string]*hashing.Consistent),
 		},
-		reminders:     opts.Reminders,
 		appID:         opts.AppID,
 		port:          strconv.Itoa(opts.Port),
 		namespace:     opts.Namespace,
@@ -277,8 +272,13 @@ func (p *placement) Lock(ctx context.Context) (context.Context, context.CancelFu
 }
 
 func (p *placement) handleLockOperation(ctx context.Context) {
-	p.tableUnlock = p.lock.Lock()
 	lockVersion := p.lockVersion.Add(1)
+
+	if p.tableUnlock != nil {
+		return
+	}
+
+	p.tableUnlock = p.lock.Lock()
 
 	clear(p.hashTable.Entries)
 
@@ -321,10 +321,6 @@ func (p *placement) handleUpdateOperation(ctx context.Context, in *v1pb.Placemen
 	p.hashTable.Version = in.GetVersion()
 	p.hashTable.Entries = entries
 
-	if p.reminders != nil {
-		p.reminders.DrainRebalancedReminders()
-	}
-
 	if err := p.actorTable.HaltNonHosted(ctx); err != nil {
 		log.Errorf("Error draining non-hosted actors: %s", err)
 	}
@@ -346,28 +342,22 @@ func (p *placement) IsActorHosted(ctx context.Context, actorType, actorID string
 }
 
 func (p *placement) handleUnlockOperation(ctx context.Context) {
-	p.updateVersion.Add(1)
-
-	found := true
-	for _, actorType := range p.actorTable.Types() {
-		if _, ok := p.hashTable.Entries[actorType]; !ok {
-			found = false
-			break
-		}
+	if p.updateVersion.Add(1) != p.lockVersion.Load() {
+		return
 	}
 
-	if found {
-		if p.reminders != nil {
-			p.reminders.OnPlacementTablesUpdated(ctx, func(ctx context.Context, req *api.LookupActorRequest) bool {
-				if ctx.Err() != nil {
-					return false
-				}
-				lar, err := p.LookupActor(ctx, req)
-				return err == nil && lar.Local
-			})
+	select {
+	case <-p.readyCh:
+	default:
+		found := true
+		for _, actorType := range p.actorTable.Types() {
+			if _, ok := p.hashTable.Entries[actorType]; !ok {
+				found = false
+				break
+			}
 		}
 
-		if p.isReady.CompareAndSwap(false, true) {
+		if found {
 			close(p.readyCh)
 		}
 	}

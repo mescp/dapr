@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -27,6 +28,7 @@ import (
 	"github.com/dapr/dapr/pkg/actors"
 	"github.com/dapr/dapr/pkg/actors/targets/workflow/orchestrator"
 	"github.com/dapr/dapr/pkg/config"
+	runtimev1pb "github.com/dapr/dapr/pkg/proto/runtime/v1"
 	"github.com/dapr/dapr/pkg/resiliency"
 	"github.com/dapr/dapr/pkg/runtime/processor"
 	backendactors "github.com/dapr/dapr/pkg/runtime/wfengine/backends/actors"
@@ -43,6 +45,7 @@ type Interface interface {
 	Run(context.Context) error
 	RegisterGrpcServer(*grpc.Server)
 	Client() workflows.Workflow
+	RuntimeMetadata() *runtimev1pb.MetadataWorkflows
 
 	ActivityActorType() string
 }
@@ -51,18 +54,18 @@ type Options struct {
 	AppID                     string
 	Namespace                 string
 	Actors                    actors.Interface
-	Spec                      config.WorkflowSpec
+	Spec                      *config.WorkflowSpec
 	BackendManager            processor.WorkflowBackendManager
 	Resiliency                resiliency.Provider
-	SchedulerReminders        bool
 	EventSink                 orchestrator.EventSink
 	EnableClusteredDeployment bool
 }
 
 type engine struct {
-	appID     string
-	namespace string
-	actors    actors.Interface
+	appID             string
+	namespace         string
+	actors            actors.Interface
+	getWorkItemsCount *atomic.Int32
 
 	worker  backend.TaskHubWorker
 	backend *backendactors.Actors
@@ -78,20 +81,18 @@ func New(opts Options) Interface {
 		Namespace:                 opts.Namespace,
 		Actors:                    opts.Actors,
 		Resiliency:                opts.Resiliency,
-		SchedulerReminders:        opts.SchedulerReminders,
 		EventSink:                 opts.EventSink,
 		EnableClusteredDeployment: opts.EnableClusteredDeployment,
 	})
 
-	var activeConns uint64
+	var getWorkItemsCount atomic.Int32
 	var lock sync.Mutex
 	executor, registerGrpcServerFn := backend.NewGrpcExecutor(abackend, log,
 		backend.WithOnGetWorkItemsConnectionCallback(func(ctx context.Context) error {
 			lock.Lock()
 			defer lock.Unlock()
 
-			activeConns++
-			if activeConns == 1 {
+			if getWorkItemsCount.Add(1) == 1 {
 				log.Debug("Registering workflow actors")
 				return abackend.RegisterActors(ctx)
 			}
@@ -106,8 +107,7 @@ func New(opts Options) Interface {
 				ctx = context.Background()
 			}
 
-			activeConns--
-			if activeConns == 0 {
+			if getWorkItemsCount.Add(-1) == 0 {
 				log.Debug("Unregistering workflow actors")
 				return abackend.UnRegisterActors(ctx)
 			}
@@ -117,17 +117,33 @@ func New(opts Options) Interface {
 		backend.WithStreamSendTimeout(time.Second*10),
 	)
 
+	var topts []backend.NewTaskWorkerOptions
+	if opts.Spec.GetMaxConcurrentWorkflowInvocations() != nil {
+		topts = []backend.NewTaskWorkerOptions{
+			backend.WithMaxParallelism(*opts.Spec.GetMaxConcurrentWorkflowInvocations()),
+		}
+	}
+
 	// There are separate "workers" for executing orchestrations (workflows) and activities
 	oworker := backend.NewOrchestrationWorker(
 		abackend,
 		executor,
 		wfBackendLogger,
-		backend.WithMaxParallelism(opts.Spec.GetMaxConcurrentWorkflowInvocations()))
+		topts...,
+	)
+
+	topts = nil
+	if opts.Spec.GetMaxConcurrentActivityInvocations() != nil {
+		topts = []backend.NewTaskWorkerOptions{
+			backend.WithMaxParallelism(*opts.Spec.GetMaxConcurrentActivityInvocations()),
+		}
+	}
 	aworker := backend.NewActivityTaskWorker(
 		abackend,
 		executor,
 		wfBackendLogger,
-		backend.WithMaxParallelism(opts.Spec.GetMaxConcurrentActivityInvocations()))
+		topts...,
+	)
 	worker := backend.NewTaskHubWorker(abackend, oworker, aworker, wfBackendLogger)
 
 	return &engine{
@@ -137,6 +153,7 @@ func New(opts Options) Interface {
 		worker:               worker,
 		backend:              abackend,
 		registerGrpcServerFn: registerGrpcServerFn,
+		getWorkItemsCount:    &getWorkItemsCount,
 		client: &client{
 			logger: wfBackendLogger,
 			client: backend.NewTaskHubClient(abackend),
@@ -177,4 +194,10 @@ func (wfe *engine) Client() workflows.Workflow {
 
 func (wfe *engine) ActivityActorType() string {
 	return wfe.backend.ActivityActorType()
+}
+
+func (wfe *engine) RuntimeMetadata() *runtimev1pb.MetadataWorkflows {
+	return &runtimev1pb.MetadataWorkflows{
+		ConnectedWorkers: wfe.getWorkItemsCount.Load(),
+	}
 }

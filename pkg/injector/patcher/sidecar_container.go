@@ -119,6 +119,10 @@ func (c *SidecarConfig) getSidecarContainer(opts getSidecarContainerOpts) (*core
 		args = append(args, "--reminders-service", c.RemindersService)
 	}
 
+	if c.SentryRequestJwtAudiences != "" {
+		args = append(args, "--sentry-request-jwt-audiences", c.SentryRequestJwtAudiences)
+	}
+
 	// --enable-api-logging is set if and only if there's an explicit value (true or false) for that
 	// This is set explicitly even if "false"
 	// This is because if this CLI flag is missing, the default specified in the Config CRD is used
@@ -492,26 +496,24 @@ func parseEnvVars(envString string, fromSecret bool) (envKeys []string, envVars 
 	envVars = make([]corev1.EnvVar, 0, len(parts))
 
 	for _, s := range parts {
-		pairs := strings.Split(strings.TrimSpace(s), "=")
-		if len(pairs) != 2 {
+		k, v, found := strings.Cut(strings.TrimSpace(s), "=")
+		if !found {
 			continue
 		}
-		envKey := pairs[0]
-		envValue := pairs[1]
-		envKeys = append(envKeys, envKey)
+		envKeys = append(envKeys, k)
 
 		if fromSecret {
-			secretSource := createSecretSource(envValue)
+			secretSource := createSecretSource(v)
 			if secretSource != nil {
 				envVars = append(envVars, corev1.EnvVar{
-					Name:      envKey,
+					Name:      k,
 					ValueFrom: secretSource,
 				})
 			}
 		} else {
 			envVars = append(envVars, corev1.EnvVar{
-				Name:  envKey,
-				Value: envValue,
+				Name:  k,
+				Value: v,
 			})
 		}
 	}

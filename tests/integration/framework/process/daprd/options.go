@@ -1,4 +1,4 @@
-/*
+/*t *testing.T
 Copyright 2023 The Dapr Authors
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -65,6 +65,7 @@ type options struct {
 	controlPlaneTrustDomain *string
 	schedulerAddresses      []string
 	maxBodySize             *string
+	allowedOrigins          *string
 }
 
 func WithExecOptions(execOptions ...exec.Option) Option {
@@ -311,9 +312,15 @@ func WithDaprAPIToken(t *testing.T, token string) Option {
 	))
 }
 
+func WithAllowedOrigins(t *testing.T, origins string) Option {
+	return func(o *options) {
+		o.allowedOrigins = &origins
+	}
+}
+
 func WithSentry(t *testing.T, sentry *sentry.Sentry) Option {
 	return func(o *options) {
-		WithExecOptions(exec.WithEnvVars(t, "DAPR_TRUST_ANCHORS", string(sentry.CABundle().TrustAnchors)))(o)
+		WithExecOptions(exec.WithEnvVars(t, "DAPR_TRUST_ANCHORS", string(sentry.CABundle().X509.TrustAnchors)))(o)
 		WithSentryAddress(sentry.Address())(o)
 		WithEnableMTLS(true)(o)
 	}
@@ -352,4 +359,10 @@ func WithMaxBodySize(size string) Option {
 	return func(o *options) {
 		o.maxBodySize = &size
 	}
+}
+
+func WithSkipStateStoreReminderMigration(t *testing.T) Option {
+	return WithExecOptions(exec.WithEnvVars(t,
+		"DAPR_SKIP_REMINDER_MIGRATION", "true",
+	))
 }

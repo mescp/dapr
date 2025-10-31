@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net/url"
 	"os"
 	"sort"
@@ -53,10 +52,6 @@ const (
 	// Enables support for hot reloading of Daprd Components.
 	HotReload Feature = "HotReload"
 
-	// Enables support for using the Scheduler control plane service
-	// for Actor Reminders.
-	SchedulerReminders Feature = "SchedulerReminders"
-
 	// Enables feature to support workflows in a clustered deployment.
 	WorkflowsClusteredDeployment Feature = "WorkflowsClusteredDeployment"
 )
@@ -72,14 +67,9 @@ const (
 	DefaultNamespace    = "default"
 	ActionPolicyApp     = "app"
 	ActionPolicyGlobal  = "global"
-
-	defaultMaxWorkflowConcurrentInvocations = math.MaxInt32
-	defaultMaxActivityConcurrentInvocations = math.MaxInt32
 )
 
-var defaultFeatures = map[Feature]bool{
-	SchedulerReminders: true,
-}
+var defaultFeatures = make(map[Feature]bool)
 
 // Configuration is an internal (and duplicate) representation of Dapr's Configuration CRD.
 //
@@ -140,26 +130,26 @@ type ConfigurationSpec struct {
 type WorkflowSpec struct {
 	// maxConcurrentWorkflowInvocations is the maximum number of concurrent workflow invocations that can be scheduled by a single Dapr instance.
 	// Attempted invocations beyond this will be queued until the number of concurrent invocations drops below this value.
-	// If omitted, the default value of 100 will be used.
+	// If omitted, no maximum will be enforced.
 	MaxConcurrentWorkflowInvocations int32 `json:"maxConcurrentWorkflowInvocations,omitempty" yaml:"maxConcurrentWorkflowInvocations,omitempty"`
 	// maxConcurrentActivityInvocations is the maximum number of concurrent activities that can be processed by a single Dapr instance.
 	// Attempted invocations beyond this will be queued until the number of concurrent invocations drops below this value.
-	// If omitted, the default value of 100 will be used.
+	// If omitted, no maximum will be enforced.
 	MaxConcurrentActivityInvocations int32 `json:"maxConcurrentActivityInvocations,omitempty" yaml:"maxConcurrentActivityInvocations,omitempty"`
 }
 
-func (w *WorkflowSpec) GetMaxConcurrentWorkflowInvocations() int32 {
+func (w *WorkflowSpec) GetMaxConcurrentWorkflowInvocations() *int32 {
 	if w == nil || w.MaxConcurrentWorkflowInvocations <= 0 {
-		return defaultMaxWorkflowConcurrentInvocations
+		return nil
 	}
-	return w.MaxConcurrentWorkflowInvocations
+	return ptr.Of(w.MaxConcurrentWorkflowInvocations)
 }
 
-func (w *WorkflowSpec) GetMaxConcurrentActivityInvocations() int32 {
+func (w *WorkflowSpec) GetMaxConcurrentActivityInvocations() *int32 {
 	if w == nil || w.MaxConcurrentActivityInvocations <= 0 {
-		return defaultMaxActivityConcurrentInvocations
+		return nil
 	}
-	return w.MaxConcurrentActivityInvocations
+	return ptr.Of(w.MaxConcurrentActivityInvocations)
 }
 
 type SecretsSpec struct {
@@ -492,10 +482,6 @@ func LoadDefaultConfiguration() *Configuration {
 				DefaultAction: AllowAccess,
 				TrustDomain:   "public",
 			},
-			WorkflowSpec: &WorkflowSpec{
-				MaxConcurrentWorkflowInvocations: defaultMaxWorkflowConcurrentInvocations,
-				MaxConcurrentActivityInvocations: defaultMaxActivityConcurrentInvocations,
-			},
 		},
 	}
 }
@@ -770,18 +756,6 @@ func (c Configuration) GetAPILoggingSpec() APILoggingSpec {
 		return APILoggingSpec{}
 	}
 	return *c.Spec.LoggingSpec.APILogging
-}
-
-// GetWorkflowSpec returns the Workflow spec.
-// It's a short-hand that includes nil-checks for safety.
-func (c *Configuration) GetWorkflowSpec() WorkflowSpec {
-	if c == nil || c.Spec.WorkflowSpec == nil {
-		return WorkflowSpec{
-			MaxConcurrentWorkflowInvocations: defaultMaxWorkflowConcurrentInvocations,
-			MaxConcurrentActivityInvocations: defaultMaxActivityConcurrentInvocations,
-		}
-	}
-	return *c.Spec.WorkflowSpec
 }
 
 // ToYAML returns the Configuration represented as YAML.

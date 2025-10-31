@@ -49,20 +49,22 @@ type Options struct {
 
 	ID string
 
-	EtcdEmbed                bool
-	EtcdInitialCluster       []string
-	EtcdDataDir              string
-	EtcdClientPort           uint64
-	EtcdSpaceQuota           int64
-	EtcdCompactionMode       string
-	EtcdCompactionRetention  string
-	EtcdSnapshotCount        uint64
-	EtcdMaxSnapshots         uint
-	EtcdMaxWALs              uint
-	EtcdBackendBatchLimit    int
-	EtcdBackendBatchInterval string
-	EtcdDefragThresholdMB    uint
-	EtcdMetrics              string
+	EtcdEmbed                      bool
+	EtcdInitialCluster             []string
+	EtcdDataDir                    string
+	EtcdClientPort                 uint64
+	EtcdClientListenAddress        string
+	EtcdSpaceQuota                 int64
+	EtcdCompactionMode             string
+	EtcdCompactionRetention        string
+	EtcdSnapshotCount              uint64
+	EtcdMaxSnapshots               uint
+	EtcdMaxWALs                    uint
+	EtcdBackendBatchLimit          int
+	EtcdBackendBatchInterval       string
+	EtcdDefragThresholdMB          uint
+	EtcdInitialElectionTickAdvance bool
+	EtcdMetrics                    string
 
 	// TODO: @joshvanl: add Etcd client TLS enabled flag.
 	EtcdClientEndpoints []string
@@ -110,6 +112,7 @@ func New(origArgs []string) (*Options, error) {
 	fs.StringSliceVar(&opts.EtcdInitialCluster, "etcd-initial-cluster", []string{"dapr-scheduler-server-0=http://localhost:2380"}, "Initial etcd cluster peers")
 	fs.StringVar(&opts.EtcdDataDir, "etcd-data-dir", "./data", "Directory to store scheduler etcd data")
 	fs.Uint64Var(&opts.EtcdClientPort, "etcd-client-port", 2379, "Port for etcd client communication")
+	fs.StringVar(&opts.EtcdClientListenAddress, "etcd-client-listen-address", "localhost", "Listen address for etcd client communication")
 	fs.StringVar(&opts.etcdSpaceQuota, "etcd-space-quota", "9.2E", "Space quota for etcd")
 	fs.StringVar(&opts.EtcdCompactionMode, "etcd-compaction-mode", "periodic", "Compaction mode for etcd. Can be 'periodic' or 'revision'")
 	fs.StringVar(&opts.EtcdCompactionRetention, "etcd-compaction-retention", "10m", "Compaction retention for etcd. Can express time  or number of revisions, depending on the value of 'etcd-compaction-mode'")
@@ -119,9 +122,10 @@ func New(origArgs []string) (*Options, error) {
 	fs.IntVar(&opts.EtcdBackendBatchLimit, "etcd-backend-batch-limit", 5000, "Maximum operations before committing the backend transaction.")
 	fs.StringVar(&opts.EtcdBackendBatchInterval, "etcd-backend-batch-interval", "50ms", "Maximum time before committing the backend transaction.")
 	fs.UintVar(&opts.EtcdDefragThresholdMB, "etcd-experimental-bootstrap-defrag-threshold-megabytes", 100, "Minimum number of megabytes needed to be freed for etcd to consider running defrag during bootstrap. Needs to be set to non-zero value to take effect.")
+	fs.BoolVar(&opts.EtcdInitialElectionTickAdvance, "etcd-initial-election-tick-advance", false, "Whether to fast-forward initial election ticks on boot for faster election. When it is true, then local member fast-forwards election ticks to speed up “initial” leader election trigger. This benefits the case of larger election ticks. Disabling this would slow down initial bootstrap process for cross datacenter deployments. Make your own tradeoffs by configuring this flag at the cost of slow initial bootstrap.")
 	fs.StringVar(&opts.EtcdMetrics, "etcd-metrics", "basic", "Level of detail for exported metrics, specify ’extensive’ to include histogram metrics.")
 
-	fs.StringArrayVar(&opts.EtcdClientEndpoints, "etcd-client-endpoints", []string{}, "Comma-separated list of etcd client endpoints to connect to. Only used when --etcd-embed is false.")
+	fs.StringSliceVar(&opts.EtcdClientEndpoints, "etcd-client-endpoints", nil, "Comma-separated list of etcd client endpoints to connect to. Only used when --etcd-embed is false.")
 	fs.StringVar(&opts.EtcdClientUsername, "etcd-client-username", "", "Username for etcd client authentication. Only used when --etcd-embed is false.")
 	fs.StringVar(&opts.EtcdClientPassword, "etcd-client-password", "", "Password for etcd client authentication. Only used when --etcd-embed is false.")
 

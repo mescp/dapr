@@ -164,18 +164,6 @@ func TestLoadStandaloneConfiguration(t *testing.T) {
 				featureName:    Feature("Test.Missing"),
 				featureEnabled: false,
 			},
-			{
-				name:           "default feature is disabled",
-				confFile:       "./testdata/default_features_disabled_config.yaml",
-				featureName:    SchedulerReminders,
-				featureEnabled: false,
-			},
-			{
-				name:           "default feature is enabled with config that doesn't have default feature disabled or enabled explicitly",
-				confFile:       "./testdata/feature_config.yaml",
-				featureName:    SchedulerReminders,
-				featureEnabled: true,
-			},
 		}
 
 		for _, tc := range testCases {
@@ -195,25 +183,6 @@ func TestLoadStandaloneConfiguration(t *testing.T) {
 		assert.True(t, mtlsSpec.Enabled)
 		assert.Equal(t, "25s", mtlsSpec.WorkloadCertTTL)
 		assert.Equal(t, "1h", mtlsSpec.AllowedClockSkew)
-	})
-
-	t.Run("workflow spec - configured", func(t *testing.T) {
-		config, err := LoadStandaloneConfiguration("./testdata/workflow_config.yaml")
-		require.NoError(t, err)
-		workflowSpec := config.GetWorkflowSpec()
-		assert.Equal(t, int32(32), workflowSpec.MaxConcurrentWorkflowInvocations)
-		assert.Equal(t, int32(64), workflowSpec.MaxConcurrentActivityInvocations)
-	})
-
-	t.Run("workflow spec - defaults", func(t *testing.T) {
-		// Intentionally loading an unrelated config file to test defaults
-		config, err := LoadStandaloneConfiguration("./testdata/mtls_config.yaml")
-		require.NoError(t, err)
-		workflowSpec := config.GetWorkflowSpec()
-
-		// These are the documented default values. Changes to these defaults require changes to
-		assert.Equal(t, int32(2147483647), workflowSpec.MaxConcurrentWorkflowInvocations)
-		assert.Equal(t, int32(2147483647), workflowSpec.MaxConcurrentActivityInvocations)
 	})
 
 	t.Run("multiple configurations", func(t *testing.T) {

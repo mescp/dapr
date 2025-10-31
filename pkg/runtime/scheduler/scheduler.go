@@ -15,6 +15,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/dapr/dapr/pkg/actors"
 	"github.com/dapr/dapr/pkg/healthz"
@@ -34,16 +35,15 @@ import (
 )
 
 type Options struct {
-	Namespace          string
-	AppID              string
-	Actors             actors.Interface
-	Channels           *channels.Channels
-	WFEngine           wfengine.Interface
-	Addresses          []string
-	Security           security.Handler
-	Healthz            healthz.Healthz
-	SchedulerReminders bool
-	SchedulerStreams   uint
+	Namespace        string
+	AppID            string
+	Actors           actors.Interface
+	Channels         *channels.Channels
+	WFEngine         wfengine.Interface
+	Addresses        []string
+	Security         security.Handler
+	Healthz          healthz.Healthz
+	SchedulerStreams uint
 }
 
 // Scheduler manages the connection to the cluster of schedulers.
@@ -54,15 +54,18 @@ type Scheduler struct {
 	client     client.Interface
 }
 
-func New(opts Options) *Scheduler {
+func New(opts Options) (*Scheduler, error) {
 	connector := connector.New(connector.Options{
-		Namespace:          opts.Namespace,
-		AppID:              opts.AppID,
-		Actors:             opts.Actors,
-		Channels:           opts.Channels,
-		WFEngine:           opts.WFEngine,
-		SchedulerReminders: opts.SchedulerReminders,
+		Namespace: opts.Namespace,
+		AppID:     opts.AppID,
+		Actors:    opts.Actors,
+		Channels:  opts.Channels,
+		WFEngine:  opts.WFEngine,
 	})
+
+	if opts.SchedulerStreams < 1 {
+		return nil, fmt.Errorf("must define at least 1 scheduler stream, got %d", opts.SchedulerStreams)
+	}
 
 	hosts := hosts.New(hosts.Options{
 		Security:  opts.Security,
@@ -89,7 +92,7 @@ func New(opts Options) *Scheduler {
 		client: wrapper.New(wrapper.Options{
 			Clients: clients,
 		}),
-	}
+	}, nil
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {

@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -32,10 +33,10 @@ import (
 	"github.com/dapr/dapr/pkg/actors"
 	actorerrors "github.com/dapr/dapr/pkg/actors/errors"
 	"github.com/dapr/dapr/pkg/actors/table"
-	"github.com/dapr/dapr/pkg/actors/targets/executor"
 	"github.com/dapr/dapr/pkg/actors/targets/workflow"
 	"github.com/dapr/dapr/pkg/actors/targets/workflow/activity"
 	"github.com/dapr/dapr/pkg/actors/targets/workflow/common"
+	"github.com/dapr/dapr/pkg/actors/targets/workflow/executor"
 	"github.com/dapr/dapr/pkg/actors/targets/workflow/orchestrator"
 	diag "github.com/dapr/dapr/pkg/diagnostics"
 	invokev1 "github.com/dapr/dapr/pkg/messaging/v1"
@@ -49,7 +50,6 @@ import (
 	"github.com/dapr/durabletask-go/backend"
 	"github.com/dapr/durabletask-go/backend/local"
 	"github.com/dapr/durabletask-go/backend/runtimestate"
-	"github.com/dapr/kit/concurrency"
 	"github.com/dapr/kit/logger"
 	"github.com/dapr/kit/ptr"
 )
@@ -64,12 +64,11 @@ const (
 )
 
 type Options struct {
-	AppID              string
-	Namespace          string
-	Actors             actors.Interface
-	Resiliency         resiliency.Provider
-	SchedulerReminders bool
-	EventSink          orchestrator.EventSink
+	AppID      string
+	Namespace  string
+	Actors     actors.Interface
+	Resiliency resiliency.Provider
+	EventSink  orchestrator.EventSink
 	// experimental feature
 	// enabling this will use the cluster tasks backend for pending tasks, instead of the default local implementation
 	// the cluster tasks backend uses actors to share the state of pending tasks
@@ -86,14 +85,14 @@ type Actors struct {
 
 	enableClusteredDeployment bool
 	pendingTasksBackend       PendingTasksBackend
-	defaultReminderInterval   *time.Duration
 	resiliency                resiliency.Provider
 	actors                    actors.Interface
-	schedulerReminders        bool
 	eventSink                 orchestrator.EventSink
 
 	orchestrationWorkItemChan chan *backend.OrchestrationWorkItem
 	activityWorkItemChan      chan *backend.ActivityWorkItem
+
+	stopped atomic.Bool
 }
 
 func New(opts Options) *Actors {
@@ -112,7 +111,6 @@ func New(opts Options) *Actors {
 		executorActorType:         ActorTypePrefix + opts.Namespace + utils.DotDelimiter + opts.AppID + utils.DotDelimiter + ExecutorNameLabelKey,
 		actors:                    opts.Actors,
 		resiliency:                opts.Resiliency,
-		schedulerReminders:        opts.SchedulerReminders,
 		pendingTasksBackend:       pendingTasksBackend,
 		enableClusteredDeployment: opts.EnableClusteredDeployment,
 		orchestrationWorkItemChan: make(chan *backend.OrchestrationWorkItem, 1),
@@ -132,7 +130,6 @@ func (abe *Actors) RegisterActors(ctx context.Context) error {
 		AppID:             abe.appID,
 		WorkflowActorType: abe.workflowActorType,
 		ActivityActorType: abe.activityActorType,
-		ReminderInterval:  abe.defaultReminderInterval,
 		Resiliency:        abe.resiliency,
 		Actors:            abe.actors,
 		Scheduler: func(ctx context.Context, wi *backend.OrchestrationWorkItem) error {
@@ -144,16 +141,14 @@ func (abe *Actors) RegisterActors(ctx context.Context) error {
 				return nil
 			}
 		},
-		SchedulerReminders: abe.schedulerReminders,
-		EventSink:          abe.eventSink,
-		ActorTypeBuilder:   actorTypeBuilder,
+		EventSink:        abe.eventSink,
+		ActorTypeBuilder: actorTypeBuilder,
 	}
 
 	aopts := activity.Options{
 		AppID:             abe.appID,
 		ActivityActorType: abe.activityActorType,
 		WorkflowActorType: abe.workflowActorType,
-		ReminderInterval:  abe.defaultReminderInterval,
 		Scheduler: func(ctx context.Context, wi *backend.ActivityWorkItem) error {
 			log.Debugf(
 				"%s: scheduling [%s#%d] activity execution with durabletask engine",
@@ -167,9 +162,8 @@ func (abe *Actors) RegisterActors(ctx context.Context) error {
 				return nil
 			}
 		},
-		Actors:             abe.actors,
-		SchedulerReminders: abe.schedulerReminders,
-		ActorTypeBuilder:   actorTypeBuilder,
+		Actors:           abe.actors,
+		ActorTypeBuilder: actorTypeBuilder,
 	}
 
 	workflowFactory, activityFactory, err := workflow.Factories(ctx, oopts, aopts)
@@ -455,7 +449,7 @@ func (abe *Actors) GetOrchestrationRuntimeState(ctx context.Context, owi *backen
 	return runtimeState, nil
 }
 
-func (abe *Actors) WatchOrchestrationRuntimeStatus(ctx context.Context, id api.InstanceID, ch chan<- *backend.OrchestrationMetadata) error {
+func (abe *Actors) WatchOrchestrationRuntimeStatus(ctx context.Context, id api.InstanceID, condition func(*backend.OrchestrationMetadata) bool) error {
 	log.Debugf("Actor backend streaming OrchestrationRuntimeStatus %s", id)
 
 	router, err := abe.actors.Router(ctx)
@@ -468,46 +462,20 @@ func (abe *Actors) WatchOrchestrationRuntimeStatus(ctx context.Context, id api.I
 		WithActor(abe.workflowActorType, string(id)).
 		WithContentType(invokev1.ProtobufContentType)
 
-	stream := make(chan *internalsv1pb.InternalInvokeResponse, 5)
-
-	for {
-		err = concurrency.NewRunnerManager(
-			func(ctx context.Context) error {
-				return router.CallStream(ctx, req, stream)
-			},
-			func(ctx context.Context) error {
-				for {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case val := <-stream:
-						var meta backend.OrchestrationMetadata
-						if perr := val.GetMessage().GetData().UnmarshalTo(&meta); perr != nil {
-							log.Errorf("Failed to unmarshal orchestration metadata: %s", perr)
-							return perr
-						}
-						select {
-						case ch <- &meta:
-						case <-ctx.Done():
-							return ctx.Err()
-						}
-					}
-				}
-			},
-		).Run(ctx)
-		if err != nil {
-			status, ok := status.FromError(err)
-			if ok && status.Code() == codes.Canceled {
-				return nil
-			}
-
-			return err
+	err = router.CallStream(ctx, req, func(resp *internalsv1pb.InternalInvokeResponse) (bool, error) {
+		var meta backend.OrchestrationMetadata
+		if perr := resp.GetMessage().GetData().UnmarshalTo(&meta); perr != nil {
+			log.Errorf("Failed to unmarshal orchestration metadata: %s", perr)
+			return false, perr
 		}
 
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+		return condition(&meta), nil
+	})
+	if err != nil {
+		return err
 	}
+
+	return nil
 }
 
 // PurgeOrchestrationState deletes all saved state for the specific orchestration instance.
@@ -536,11 +504,13 @@ func (abe *Actors) PurgeOrchestrationState(ctx context.Context, id api.InstanceI
 
 // Start implements backend.Backend
 func (abe *Actors) Start(ctx context.Context) error {
+	abe.stopped.Store(false)
 	return nil
 }
 
 // Stop implements backend.Backend
-func (*Actors) Stop(context.Context) error {
+func (abe *Actors) Stop(context.Context) error {
+	abe.stopped.Store(true)
 	return nil
 }
 
@@ -607,22 +577,47 @@ func (abe *Actors) ActivityActorType() string {
 
 // CancelActivityTask implements backend.Backend.
 func (abe *Actors) CancelActivityTask(ctx context.Context, instanceID api.InstanceID, taskID int32) error {
-	return abe.pendingTasksBackend.CancelActivityTask(ctx, instanceID, taskID)
+	return abe.callWithBackoff(ctx, func() error {
+		return abe.pendingTasksBackend.CancelActivityTask(ctx, instanceID, taskID)
+	})
 }
 
 // CancelOrchestratorTask implements backend.Backend.
 func (abe *Actors) CancelOrchestratorTask(ctx context.Context, instanceID api.InstanceID) error {
-	return abe.pendingTasksBackend.CancelOrchestratorTask(ctx, instanceID)
+	return abe.callWithBackoff(ctx, func() error {
+		return abe.pendingTasksBackend.CancelOrchestratorTask(ctx, instanceID)
+	})
 }
 
 // CompleteActivityTask implements backend.Backend.
 func (abe *Actors) CompleteActivityTask(ctx context.Context, response *protos.ActivityResponse) error {
-	return abe.pendingTasksBackend.CompleteActivityTask(ctx, response)
+	return abe.callWithBackoff(ctx, func() error {
+		return abe.pendingTasksBackend.CompleteActivityTask(ctx, response)
+	})
 }
 
 // CompleteOrchestratorTask implements backend.Backend.
 func (abe *Actors) CompleteOrchestratorTask(ctx context.Context, response *protos.OrchestratorResponse) error {
-	return abe.pendingTasksBackend.CompleteOrchestratorTask(ctx, response)
+	return abe.callWithBackoff(ctx, func() error {
+		return abe.pendingTasksBackend.CompleteOrchestratorTask(ctx, response)
+	})
+}
+
+func (abe *Actors) callWithBackoff(ctx context.Context, fn func() error) error {
+	return backoff.Retry(func() error {
+		err := fn()
+		if err != nil && ctx.Err() == nil {
+			log.Warnf("error completing activity task: %v, retrying...", err)
+		}
+		if abe.stopped.Load() {
+			return backoff.Permanent(err)
+		}
+		return err
+	}, backoff.WithContext(
+		backoff.NewExponentialBackOff(
+			backoff.WithMaxInterval(3*time.Second),
+			backoff.WithRandomizationFactor(0.3),
+		), ctx))
 }
 
 // WaitForActivityCompletion implements backend.Backend.

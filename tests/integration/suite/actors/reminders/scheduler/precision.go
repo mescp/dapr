@@ -16,8 +16,6 @@ package scheduler
 import (
 	"context"
 	"net/http"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -51,17 +49,6 @@ type request struct {
 }
 
 func (r *precision) Setup(t *testing.T) []framework.Option {
-	configFile := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(configFile, []byte(`
-apiVersion: dapr.io/v1alpha1
-kind: Configuration
-metadata:
-  name: schedulerreminders
-spec:
-  features:
-  - name: SchedulerReminders
-    enabled: true`), 0o600))
-
 	r.called = slice.New[*request]()
 
 	handler := http.NewServeMux()
@@ -90,7 +77,6 @@ spec:
 	srv := prochttp.New(t, prochttp.WithHandler(handler))
 	r.place = placement.New(t)
 	r.daprd = daprd.New(t,
-		daprd.WithConfigs(configFile),
 		daprd.WithInMemoryActorStateStore("mystore"),
 		daprd.WithPlacementAddresses(r.place.Address()),
 		daprd.WithSchedulerAddresses(r.scheduler.Address()),
@@ -123,13 +109,13 @@ func (r *precision) Run(t *testing.T, ctx context.Context) {
 		ActorId:   "myactorid",
 		Name:      "ms",
 		Data:      []byte("reminderdata"),
-		Period:    "400ms",
-		Ttl:       "5s",
+		Period:    "1ms",
+		Ttl:       "10ms",
 	})
 	require.NoError(t, err)
 
 	assert.EventuallyWithT(t, func(c *assert.CollectT) {
-		assert.Len(c, r.called.Slice(), 17)
+		assert.Len(c, r.called.Slice(), 15)
 	}, time.Second*10, time.Millisecond*10)
 
 	eMap := make(map[string][]*request)
@@ -137,9 +123,9 @@ func (r *precision) Run(t *testing.T, ctx context.Context) {
 		eMap[v.name] = append(eMap[v.name], v)
 	}
 
-	tolerance := 100 * time.Millisecond
+	tolerance := 500 * time.Millisecond
 	assertDurationWithTolerance(t, eMap, "sec", 1*time.Second, float64(tolerance))
-	assertDurationWithTolerance(t, eMap, "ms", 400*time.Millisecond, float64(tolerance))
+	assertDurationWithTolerance(t, eMap, "ms", time.Millisecond, float64(tolerance))
 }
 
 func assertDurationWithTolerance(t *testing.T, values map[string][]*request, key string, expectedDiff time.Duration, tolerance float64) {
